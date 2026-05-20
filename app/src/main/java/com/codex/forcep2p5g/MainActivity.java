@@ -9,8 +9,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 
 public class MainActivity extends Activity {
@@ -40,10 +38,11 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("Hook 作用于：\n" +
+        desc.setText("Hook 作用：\n" +
             "· com.heytap.accessory（强制 P2P 5GHz）\n" +
             "· com.oplus.subsys（VcCapability forbidFlag = 0）\n\n" +
-            "修改模块后点下面按钮杀掉目标进程，下次被拉起时会装载新 hook。不需要重启 pad。");
+            "改 hook 后点这里杀掉目标进程，下次被拉起就装上新 hook。" +
+            "系统 UID 进程（subsys 等）会用 kill -9 强杀，需要 KSU root 授权。");
         desc.setPadding(0, 24, 0, 32);
         root.addView(desc);
 
@@ -60,7 +59,6 @@ public class MainActivity extends Activity {
         status = new TextView(this);
         status.setPadding(0, 32, 0, 0);
         status.setText("状态：待命");
-        status.setGravity(Gravity.START);
         root.addView(status);
 
         setContentView(root);
@@ -76,10 +74,17 @@ public class MainActivity extends Activity {
                 try {
                     p = Runtime.getRuntime().exec(new String[]{"su"});
                     OutputStream os = p.getOutputStream();
+                    // 1) Try am force-stop first (works for normal apps)
                     for (String t : TARGETS) {
-                        String cmd = "am force-stop " + t + "\n";
-                        os.write(cmd.getBytes());
-                        sb.append(cmd);
+                        String pkg = t.contains(":") ? t.substring(0, t.indexOf(':')) : t;
+                        os.write(("am force-stop " + pkg + "\n").getBytes());
+                    }
+                    // 2) kill -9 by process name (works for system UID apps where
+                    //    force-stop is silently rejected). pkill -f matches full
+                    //    cmdline so we hit the truncated names in /proc.
+                    for (String t : TARGETS) {
+                        os.write(("pkill -9 -f " + t + " || true\n").getBytes());
+                        sb.append("am force-stop / pkill -9 -f ").append(t).append('\n');
                     }
                     os.write("exit\n".getBytes());
                     os.flush();
@@ -88,7 +93,7 @@ public class MainActivity extends Activity {
                     int rc = p.waitFor();
                     final boolean ok = (rc == 0);
                     final String msg = ok
-                        ? "完成：已重启以下进程\n" + sb
+                        ? "完成：已尝试重启以下进程\n" + sb
                         : "失败：su 返回 " + rc;
                     runOnUiThread(new Runnable() {
                         @Override public void run() {
