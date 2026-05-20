@@ -1,6 +1,5 @@
 pluginManagement {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/public' }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -10,12 +9,21 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/public' }
-        maven { url 'https://maven.aliyun.com/repository/google' }
         google()
         mavenCentral()
-        maven { url 'https://api.xposed.info/' }
-        maven { url 'https://jitpack.io' }
+        // jcenter mirror — only place that still serves de.robv.android.xposed:api:82
+        maven {
+            url 'https://maven.aliyun.com/repository/jcenter'
+            content {
+                includeGroup 'de.robv.android.xposed'
+            }
+        }
+        maven {
+            url 'https://maven.aliyun.com/repository/public'
+            content {
+                includeGroup 'de.robv.android.xposed'
+            }
+        }
     }
 }
 
