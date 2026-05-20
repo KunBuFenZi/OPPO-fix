@@ -16,6 +16,7 @@ public class Hook implements IXposedHookLoadPackage {
     private static final int BAND_5GHZ = 2;
     private static final String C1_NAME = "com.oplus.virtualcomm2.c1";
     private static final String D3_NAME = "com.oplus.virtualcomm2.d3";
+    private static final String Y0_NAME = "com.oplus.virtualcomm2.y0";
 
     @Override
     public void handleLoadPackage(LoadPackageParam lpparam) {
@@ -144,6 +145,26 @@ public class Hook implements IXposedHookLoadPackage {
             XposedBridge.log(TAG_VC + " hook on d3.h installed via loader " + loader);
         } catch (Throwable t) {
             XposedBridge.log(TAG_VC + " d3.h hook failed (non-fatal): " + t);
+        }
+
+        // y0.x0() == isAllSimCardRemoved(). On tb375fc, modem RIL never reports
+        // SIM_STATE_ABSENT (mSimState=UNKNOWN), so this returns false even with
+        // no card inserted. That makes c1.b0() add the forbid bit and pad's own
+        // capability frame goes out as forbidFlag=258, telling phone "I'm not
+        // ready" so phone refuses to share its modem TO us. Forcing this to true
+        // matches the "tablet has no SIM" intent.
+        try {
+            Class<?> y0Cls = XposedHelpers.findClass(Y0_NAME, loader);
+            XposedBridge.hookAllMethods(y0Cls, "x0", new XC_MethodReplacement() {
+                @Override
+                protected Object replaceHookedMethod(MethodHookParam param) {
+                    XposedBridge.log(TAG_VC + " y0.x0() -> true (forced all-SIM-removed)");
+                    return Boolean.TRUE;
+                }
+            });
+            XposedBridge.log(TAG_VC + " hook on y0.x0() installed via loader " + loader);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG_VC + " y0.x0() hook failed (non-fatal): " + t);
         }
         return true;
     }
