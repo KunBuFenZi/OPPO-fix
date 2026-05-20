@@ -17,7 +17,10 @@ public class Hook implements IXposedHookLoadPackage {
     public void handleLoadPackage(LoadPackageParam lpparam) {
         if ("com.heytap.accessory".equals(lpparam.packageName)) {
             hookP2PBand(lpparam);
-        } else if ("com.oplus.subsys".equals(lpparam.packageName)) {
+        } else if ("com.oplus.subsys".equals(lpparam.packageName)
+                || "com.oplus.virtualcomm2".equals(lpparam.packageName)) {
+            // c1 lives in com.oplus.virtualcomm2 (VirtualCommService.apk);
+            // also try in com.oplus.subsys in case the build inlines it there.
             hookVcForbidFlag(lpparam);
         }
     }
