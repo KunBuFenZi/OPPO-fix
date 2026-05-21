@@ -89,6 +89,10 @@ public class Hook implements IXposedHookLoadPackage {
 
         final AtomicBoolean installed = new AtomicBoolean(false);
 
+        // BaseDexClassLoader.findClass watcher — original strategy. Works only
+        // when c1's classloader actually delegates to BaseDexClassLoader's
+        // findClass. OPlus' plugin loader appears to bypass this on tb375fc,
+        // so we keep this but add fallbacks below.
         try {
             Class<?> baseCls = Class.forName("dalvik.system.BaseDexClassLoader");
             XposedBridge.hookAllMethods(baseCls, "findClass", new XC_MethodHook() {
@@ -101,7 +105,7 @@ public class Hook implements IXposedHookLoadPackage {
                     if (param.getResult() == null) return;
 
                     ClassLoader pluginLoader = (ClassLoader) param.thisObject;
-                    XposedBridge.log(TAG_VC + " caught plugin loader for c1: " + pluginLoader);
+                    XposedBridge.log(TAG_VC + " caught BaseDexClassLoader.findClass for c1: " + pluginLoader);
                     if (tryHookC1(pluginLoader)) {
                         installed.set(true);
                     }
@@ -109,7 +113,73 @@ public class Hook implements IXposedHookLoadPackage {
             });
             XposedBridge.log(TAG_VC + " BaseDexClassLoader.findClass watcher installed");
         } catch (Throwable t) {
-            XposedBridge.log(TAG_VC + " failed to install BaseDexClassLoader watcher: " + t);
+            XposedBridge.log(TAG_VC + " BaseDexClassLoader watcher failed: " + t);
+        }
+
+        // Fallback A: hook ClassLoader.loadClass on EVERY classloader. This
+        // catches even fully custom loaders, as long as they extend ClassLoader
+        // and don't override loadClass to bypass super entirely.
+        try {
+            XposedBridge.hookAllMethods(ClassLoader.class, "loadClass", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (installed.get()) return;
+                    if (param.args.length == 0 || !(param.args[0] instanceof String)) return;
+                    String name = (String) param.args[0];
+                    if (!C1_NAME.equals(name)) return;
+                    if (param.getResult() == null) return;
+
+                    ClassLoader cl = (ClassLoader) param.thisObject;
+                    XposedBridge.log(TAG_VC + " caught ClassLoader.loadClass for c1: " + cl);
+                    if (tryHookC1(cl)) {
+                        installed.set(true);
+                    }
+                }
+            });
+            XposedBridge.log(TAG_VC + " ClassLoader.loadClass watcher installed");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG_VC + " ClassLoader.loadClass watcher failed: " + t);
+        }
+
+        // Fallback B: hook android.util.Log.d. DistributedCommDev (= c1) logs
+        // its own state via Log.d with tag/msg containing "DistributedCommDev".
+        // When we see one of those calls, c1 is definitely loaded; grab the
+        // calling thread's context classloader and walk it to find c1.
+        try {
+            Class<?> logCls = Class.forName("android.util.Log");
+            XposedBridge.hookAllMethods(logCls, "d", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (installed.get()) return;
+                    if (param.args.length < 2) return;
+                    String tag = String.valueOf(param.args[0]);
+                    String msg = String.valueOf(param.args[1]);
+                    if (!tag.contains("DistributedCommDev")
+                            && !msg.contains("DistributedCommDev")) return;
+
+                    // Try every classloader we can reach.
+                    ClassLoader[] candidates = new ClassLoader[]{
+                        Thread.currentThread().getContextClassLoader(),
+                        lpparam.classLoader,
+                        ClassLoader.getSystemClassLoader(),
+                    };
+                    for (ClassLoader probe : candidates) {
+                        for (ClassLoader cl = probe; cl != null; cl = cl.getParent()) {
+                            try {
+                                cl.loadClass(C1_NAME);
+                                XposedBridge.log(TAG_VC + " Log.d trace -> c1 in loader " + cl);
+                                if (tryHookC1(cl)) {
+                                    installed.set(true);
+                                    return;
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                }
+            });
+            XposedBridge.log(TAG_VC + " Log.d trace fallback installed");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG_VC + " Log.d trace fallback failed: " + t);
         }
     }
 
